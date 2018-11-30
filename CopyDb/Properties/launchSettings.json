@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CopyDb": {
+      "commandName": "Project",
+      "commandLineArgs": "partners.json"
+    }
+  }
+}
