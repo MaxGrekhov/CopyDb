@@ -11,7 +11,7 @@ namespace CopyDb.Core
 {
     public interface ICopyService
     {
-        Task Run();
+        Task<bool> Run();
     }
 
     public class CopyService : ICopyService
@@ -25,20 +25,29 @@ namespace CopyDb.Core
             _logger = logger;
         }
 
-        public async Task Run()
+        public async Task<bool> Run()
         {
-            var config = _config.Get<AppConfig>();
-            var source = GetProvider(config?.Source?.Type, config?.Source?.Schema, config?.Source?.Connection);
-            var destination = GetProvider(config?.Destination?.Type, config?.Destination?.Schema, config?.Destination?.Connection);
-            if (source == null || destination == null)
-                return;
-            var srcTables = await source.GetInfos(config?.Source?.Filter);
-            var destTables = await destination.GetInfos(config?.Destination?.Filter);
-            if (SimpleSchemaComparer(srcTables, destTables, config?.CheckTypes == true))
+            try
             {
-                await Delete(destTables, destination);
-                await Copy(destTables, source, destination);
+                var config = _config.Get<AppConfig>() ?? new AppConfig();
+                var source = GetProvider(config.Source?.Type, config.Source?.Schema, config.Source?.Connection);
+                var destination = GetProvider(config.Destination?.Type, config.Destination?.Schema, config.Destination?.Connection);
+                if (source == null || destination == null)
+                    return false;
+                var srcTables = await source.GetInfos(config.Source?.Filter);
+                var destTables = await destination.GetInfos(config.Destination?.Filter);
+                if (SimpleSchemaComparer(srcTables, destTables, config.CheckTypes))
+                {
+                    await Delete(destTables, destination);
+                    await Copy(destTables, source, destination, config.PageSize);
+                }
             }
+            catch (Exception e)
+            {
+                _logger.Error(e);
+                return false;
+            }
+            return true;
         }
 
         private IDbProvider GetProvider(string type, string schema, string connection)
@@ -47,6 +56,7 @@ namespace CopyDb.Core
             {
                 case "sqlserver": return new SqlServerDbProvider(schema, connection);
                 case "postgres": return new PostgresDbProvider(schema, connection);
+                case "mysql": return new MySqlDbProvider(schema, connection);
             }
             _logger.Error($"Unknown db provider: {type?.ToLower()}");
             return null;
@@ -118,7 +128,7 @@ namespace CopyDb.Core
             }
         }
 
-        private async Task Copy(List<TableInfo> infos, IDbProvider source, IDbProvider destination)
+        private async Task Copy(List<TableInfo> infos, IDbProvider source, IDbProvider destination, int pageSize)
         {
             infos = infos.ToList();
             var orderedList = new List<TableInfo>();
@@ -132,40 +142,30 @@ namespace CopyDb.Core
                 orderedList.Add(info);
             }
             _logger.Trace($"ordered to copy: {string.Join(", ", orderedList.Select(x => x.Name))}");
-            var pageSize = 1000;
             var sw = new Stopwatch();
             foreach (var info in orderedList)
             {
-                try
+                using (destination.BeginTransaction())
                 {
-
-                    using (destination.BeginTransaction())
+                    sw.Restart();
+                    if (info.Columns.Count > 0)
                     {
-                        sw.Restart();
-                        if (info.Columns.Count > 0)
+                        await destination.BeforeInsert(info);
+                        int page = 0;
+                        while (true)
                         {
-                            await destination.BeforeInsert(info);
-                            int page = 0;
-                            while (true)
-                            {
-                                page++;
-                                var items = await source.Select(info, page, pageSize);
-                                if (items.Count > 0)
-                                    await destination.Insert(info, items);
-                                _logger.Info($"Copied {(page - 1) * pageSize + items.Count} rows to '{info.Name}' elapsed time {sw.ElapsedMilliseconds / 1000} sec");
-                                if (items.Count != pageSize)
-                                    break;
-                            }
-                            await destination.AfterInsert(info);
+                            page++;
+                            var table = await source.Select(info, page, pageSize);
+                            if (table.Rows.Count > 0)
+                                await destination.Insert(info, table);
+                            _logger.Info($"Copied {(page - 1) * pageSize + table.Rows.Count} rows to '{info.Name}' elapsed time {sw.ElapsedMilliseconds / 1000} sec");
+                            if (table.Rows.Count != pageSize)
+                                break;
                         }
-                        sw.Stop();
-                        destination.Commit();
+                        await destination.AfterInsert(info);
                     }
-                }
-                catch (Exception e)
-                {
-                    _logger.Error(e);
-                    throw;
+                    sw.Stop();
+                    destination.Commit();
                 }
             }
         }

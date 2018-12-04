@@ -11,7 +11,7 @@ namespace CopyDb
 {
     class Program
     {
-        static async Task Main(string[] args)
+        static async Task<int> Main(string[] args)
         {
             Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
             Dapper.SqlMapper.AddTypeMap(typeof(DateTime), DbType.DateTime2);
@@ -22,12 +22,12 @@ namespace CopyDb
                 if (args?.Length != 1)
                 {
                     logger.Error("Wrong number of parameters");
-                    return;
+                    return 1;
                 }
                 if (!File.Exists(args[0]))
                 {
                     logger.Error($"Can't find config file: '{args[0]}'");
-                    return;
+                    return 1;
                 }
                 var configuration = new ConfigurationBuilder().AddJsonFile(args[0]).Build();
                 var container = new ServiceCollection();
@@ -36,14 +36,16 @@ namespace CopyDb
                 container.AddTransient<ICopyService, CopyService>();
                 var provider = container.BuildServiceProvider();
                 var copyService = provider.GetService<ICopyService>();
-                await copyService.Run();
+                if (!await copyService.Run())
+                    return 1;
 
             }
             catch (Exception e)
             {
                 logger.Error(e);
-                throw;
+                return 1;
             }
+            return 0;
         }
     }
 }

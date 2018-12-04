@@ -18,6 +18,38 @@ namespace CopyDb.Core
         protected string BeginEscape { get; set; }
         protected string EndEscape { get; set; }
 
+
+        protected string ColumnsSql = @"
+                select table_name, column_name, column_default, is_nullable, data_type
+                from information_schema.columns
+                where table_schema = @schema
+                order by table_name, ordinal_position;";
+
+        protected string ConstraintSql = @"
+                select  
+                     kcu1.constraint_name as fkconstraintname 
+                    ,kcu1.table_name as fktablename 
+                    ,kcu1.column_name as fkcolumnname 
+                    ,kcu1.ordinal_position as fkordinalposition 
+                    ,kcu2.constraint_name as referencedconstraintname 
+                    ,kcu2.table_name as referencedtablename 
+                    ,kcu2.column_name as referencedcolumnname 
+                    ,kcu2.ordinal_position as referencedordinalposition 
+                from information_schema.referential_constraints as rc 
+
+                inner join information_schema.key_column_usage as kcu1 
+                    on kcu1.constraint_catalog = rc.constraint_catalog  
+                    and kcu1.constraint_schema = rc.constraint_schema 
+                    and kcu1.constraint_name = rc.constraint_name 
+
+                inner join information_schema.key_column_usage as kcu2 
+                    on kcu2.constraint_catalog = rc.unique_constraint_catalog  
+                    and kcu2.constraint_schema = rc.unique_constraint_schema 
+                    and kcu2.constraint_name = rc.unique_constraint_name 
+                    and kcu2.ordinal_position = kcu1.ordinal_position 
+                where rc.constraint_schema = @schema
+                order by fktablename, fkcolumnname, referencedtablename, referencedcolumnname";
+
         protected IDbTransaction Transaction;
 
         protected BaseDbProvider(string schema, IDbConnection connection)
@@ -45,36 +77,7 @@ namespace CopyDb.Core
 
         public async Task<List<TableInfo>> GetInfos(string filter)
         {
-            var columnsSql = @"
-                select table_name, column_name, column_default, is_nullable, data_type
-                from information_schema.columns
-                where table_schema = @schema
-                order by table_name, ordinal_position;";
-            var contraitSql = @"
-                select  
-                     kcu1.constraint_name as fkconstraintname 
-                    ,kcu1.table_name as fktablename 
-                    ,kcu1.column_name as fkcolumnname 
-                    ,kcu1.ordinal_position as fkordinalposition 
-                    ,kcu2.constraint_name as referencedconstraintname 
-                    ,kcu2.table_name as referencedtablename 
-                    ,kcu2.column_name as referencedcolumnname 
-                    ,kcu2.ordinal_position as referencedordinalposition 
-                from information_schema.referential_constraints as rc 
-
-                inner join information_schema.key_column_usage as kcu1 
-                    on kcu1.constraint_catalog = rc.constraint_catalog  
-                    and kcu1.constraint_schema = rc.constraint_schema 
-                    and kcu1.constraint_name = rc.constraint_name 
-
-                inner join information_schema.key_column_usage as kcu2 
-                    on kcu2.constraint_catalog = rc.unique_constraint_catalog  
-                    and kcu2.constraint_schema = rc.unique_constraint_schema 
-                    and kcu2.constraint_name = rc.unique_constraint_name 
-                    and kcu2.ordinal_position = kcu1.ordinal_position 
-                where rc.constraint_schema = @schema
-                order by fktablename, fkcolumnname, referencedtablename, referencedcolumnname";
-            var columns = await Connection.QueryAsync<TableQueryModel>(columnsSql, new { schema = Schema }, Transaction);
+            var columns = await Connection.QueryAsync<TableQueryModel>(ColumnsSql, new { schema = Schema }, Transaction);
             var infos = columns.GroupBy(x => x.TableName)
                 .Select(x => new TableInfo
                 {
@@ -90,7 +93,7 @@ namespace CopyDb.Core
                 .ToList();
             if (!string.IsNullOrEmpty(filter))
                 infos = infos.Where(x => Regex.IsMatch(x.Name, filter)).ToList();
-            var constraints = (await Connection.QueryAsync<ConstraintQueryModel>(contraitSql, new { schema = Schema })).AsList();
+            var constraints = (await Connection.QueryAsync<ConstraintQueryModel>(ConstraintSql, new { schema = Schema })).AsList();
             foreach (var info in infos)
             {
                 info.Dependencies = constraints
@@ -106,7 +109,7 @@ namespace CopyDb.Core
             return infos;
         }
 
-        public virtual async Task<List<dynamic>> Select(TableInfo info, int page, int count)
+        public virtual async Task<DataTable> Select(TableInfo info, int page, int count)
         {
             var sb = new StringBuilder();
             sb.Append("select ");
@@ -131,7 +134,11 @@ namespace CopyDb.Core
             sb.Append(EndEscape);
             sb.Append(" ");
             sb.Append(GetPaginationSql(info, page, count));
-            return (await Connection.QueryAsync<dynamic>(sb.ToString(), new { offset = (page - 1) * count, limit = count }, Transaction)).AsList();
+            var reader = await Connection.ExecuteReaderAsync(sb.ToString(),
+                new { offset = (page - 1) * count, limit = count }, Transaction);
+            var table = new DataTable();
+            table.Load(reader);
+            return table;
         }
 
         protected abstract string GetPaginationSql(TableInfo info, int page, int count);
@@ -141,37 +148,7 @@ namespace CopyDb.Core
             return Task.CompletedTask;
         }
 
-        public virtual async Task Insert(TableInfo info, List<dynamic> items)
-        {
-            var sb = new StringBuilder();
-            sb.Append("insert into ");
-            sb.Append($@"{BeginEscape}{Schema}{EndEscape}.{BeginEscape}{info.Name}{EndEscape}");
-            sb.Append(" (");
-            var first = true;
-            foreach (var column in info.Columns)
-            {
-                if (first)
-                    first = false;
-                else
-                    sb.Append(",");
-                sb.Append(BeginEscape);
-                sb.Append(column.Name);
-                sb.Append(EndEscape);
-            }
-            sb.Append(") values (");
-            first = true;
-            foreach (var column in info.Columns)
-            {
-                if (first)
-                    first = false;
-                else
-                    sb.Append(",");
-                sb.Append("@");
-                sb.Append(column.Name);
-            }
-            sb.Append(")");
-            await Connection.ExecuteAsync(sb.ToString(), items, Transaction);
-        }
+        public abstract Task Insert(TableInfo info, DataTable table);
 
         public virtual Task AfterInsert(TableInfo info)
         {
