@@ -12,7 +12,7 @@ namespace CopyDb.Models
 
         public override string ToString()
         {
-            return $"({Name} {Type} {(IsNullable ? "NULL" : "NOT NULL")} {(string.IsNullOrEmpty(DefaultValue) ? "" : "DEFAULT" + DefaultValue)})";
+            return $"({Name} {Type} {(IsNullable ? "NULL" : "NOT NULL")} {(string.IsNullOrEmpty(DefaultValue) ? "" : "DEFAULT " + DefaultValue)})";
         }
     }
 }

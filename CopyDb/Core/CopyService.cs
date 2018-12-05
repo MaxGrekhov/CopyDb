@@ -36,10 +36,11 @@ namespace CopyDb.Core
                     return false;
                 var srcTables = await source.GetInfos(config.Source?.Filter);
                 var destTables = await destination.GetInfos(config.Destination?.Filter);
-                if (SimpleSchemaComparer(srcTables, destTables, config.CheckTypes))
+                var diff = SimpleSchemaComparer(srcTables, destTables, config.CheckTypes);
+                if (diff.isSame || config.Force)
                 {
-                    await Delete(destTables, destination);
-                    await Copy(destTables, source, destination, config.PageSize);
+                    await Delete(diff.common, destination);
+                    await Copy(diff.common, source, destination, config.PageSize);
                 }
             }
             catch (Exception e)
@@ -62,9 +63,9 @@ namespace CopyDb.Core
             return null;
         }
 
-        private bool SimpleSchemaComparer(List<TableInfo> source, List<TableInfo> destination, bool checkTypes)
+        private (bool isSame, List<TableInfo> common) SimpleSchemaComparer(List<TableInfo> source, List<TableInfo> destination, bool checkTypes)
         {
-            var result = true;
+            var result = (isSame: true, common: new List<TableInfo>());
             var (commonTables, onlySrcTables, onlyDestTables) =
                 Diff(source, destination, (src, dest) => string.Equals(src.Name, dest.Name, StringComparison.InvariantCultureIgnoreCase));
             if (onlySrcTables.Count > 0 || onlyDestTables.Count > 0)
@@ -73,7 +74,7 @@ namespace CopyDb.Core
                     _logger.Error("Source have unique tables: " + string.Join(", ", onlySrcTables));
                 if (onlyDestTables.Count > 0)
                     _logger.Error("Destination have unique tables: " + string.Join(", ", onlyDestTables));
-                result = false;
+                result.isSame = false;
             }
 
             Func<ColumnInfo, ColumnInfo, bool> columnComparer;
@@ -84,15 +85,22 @@ namespace CopyDb.Core
                 columnComparer = (src, dest) => string.Equals(src.Name, dest.Name, StringComparison.InvariantCultureIgnoreCase);
             foreach (var common in commonTables)
             {
-                var (_, onlySrcColumns, onlyDestColumns) =
+                var (commonColumns, onlySrcColumns, onlyDestColumns) =
                     Diff(common.src.Columns, common.dest.Columns, columnComparer);
+                result.common.Add(new TableInfo
+                {
+                    Name = common.dest.Name,
+                    Columns = commonColumns.Select(x => x.dest).ToList(),
+                    Dependencies = common.dest.Dependencies,
+                    References = common.dest.References
+                });
                 if (onlySrcColumns.Count > 0 || onlyDestColumns.Count > 0)
                 {
                     if (onlySrcColumns.Count > 0)
                         _logger.Error("Source table " + common.src.Name + " have unique columns: " + string.Join(", ", onlySrcColumns));
                     if (onlyDestColumns.Count > 0)
                         _logger.Error("Destination table " + common.dest.Name + " have unique columns: " + string.Join(", ", onlyDestColumns));
-                    result = false;
+                    result.isSame = false;
                 }
             }
             return result;

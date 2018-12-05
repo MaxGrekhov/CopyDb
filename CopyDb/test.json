@@ -1,15 +1,17 @@
 ﻿{
+  "force": false, 
   "checkTypes": false,
   "pageSize": 10000,
   "source": {
     "type": "sqlserver",
     "schema": "dbo",
-    "connection": "source_connection_string_here",
+    "connection": "source connection string",
     "filter": null
   },
   "destination": {
     "type": "postgres",
     "schema": "public",
-    "connection": "destination_connection_string_here"
+    "connection": "destination connection string",
+    "filter": null
   }
 }
