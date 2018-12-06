@@ -1,6 +1,8 @@
 ﻿{
-  "force": false, 
+  "force": false,
   "checkTypes": false,
+  "delete": true,
+  "copy": true,
   "pageSize": 10000,
   "source": {
     "type": "sqlserver",

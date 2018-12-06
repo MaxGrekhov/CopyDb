@@ -101,7 +101,7 @@ namespace CopyDb.Core
                     .Select(x => x.ReferencedTableName)
                     .ToList();
                 info.References = constraints
-                    .Where(x => x.ReferencedTableName == info.Name)
+                    .Where(x => x.ReferencedTableName == info.Name && (string.IsNullOrEmpty(filter) || Regex.IsMatch(x.FkTableName, filter)))
                     .Select(x => x.FkTableName)
                     .ToList();
             }
@@ -158,7 +158,7 @@ namespace CopyDb.Core
         public virtual async Task Delete(TableInfo info)
         {
             var sql = $@"delete from {BeginEscape}{Schema}{EndEscape}.{BeginEscape}{info.Name}{EndEscape} where 1=1;";
-            await Connection.ExecuteAsync(sql, null, Transaction);
+            await Connection.ExecuteAsync(sql, null, Transaction, 3600);
         }
 
         public void Dispose()

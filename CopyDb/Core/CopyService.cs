@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
@@ -23,6 +24,9 @@ namespace CopyDb.Core
         {
             _config = config;
             _logger = logger;
+
+            Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
+            Dapper.SqlMapper.AddTypeMap(typeof(DateTime), DbType.DateTime2);
         }
 
         public async Task<bool> Run()
@@ -39,8 +43,10 @@ namespace CopyDb.Core
                 var diff = SimpleSchemaComparer(srcTables, destTables, config.CheckTypes);
                 if (diff.isSame || config.Force)
                 {
-                    await Delete(diff.common, destination);
-                    await Copy(diff.common, source, destination, config.PageSize);
+                    if (config.Delete)
+                        await Delete(diff.common, destination);
+                    if (config.Copy)
+                        await Copy(diff.common, source, destination, config.PageSize);
                 }
             }
             catch (Exception e)

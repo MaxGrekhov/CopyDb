@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Data;
 using System.IO;
 using System.Threading.Tasks;
 using CopyDb.Common;
@@ -13,8 +12,6 @@ namespace CopyDb
     {
         static async Task<int> Main(string[] args)
         {
-            Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
-            Dapper.SqlMapper.AddTypeMap(typeof(DateTime), DbType.DateTime2);
             NLog.LogManager.LoadConfiguration("nlog.config");
             var logger = NLog.LogManager.GetCurrentClassLogger();
             try

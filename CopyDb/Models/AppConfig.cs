@@ -10,8 +10,10 @@
 
     public class AppConfig
     {
-        public int PageSize { get; set; } = 1000;
+        public int PageSize { get; set; } = 10000;
         public bool Force { get; set; }
+        public bool Delete { get; set; } = true;
+        public bool Copy { get; set; } = true;
         public bool CheckTypes { get; set; }
         public DbInfo Source { get; set; }
         public DbInfo Destination { get; set; }
