@@ -4,6 +4,69 @@
   "delete": true,
   "copy": true,
   "pageSize": 10000,
+  "tables": [
+    {
+      "name": "Test1",
+      "columns": [
+        {
+          "name": "ConstFixedText",
+          "value": "Lorem \r\n\t 01234567890\r\n\tipsum dolor\r\n\t()<>{}[]|\/|?.,+-=!@#$%^&*\"\\'`\r\n\tadipisicing\r\nelit."
+        },
+        {
+          "name": "ConstSmallText",
+          "value": "Lorem \r\n\t 01234567890\r\n\tipsum dolor\r\n\t()<>{}[]|\/|?.,+-=!@#$%^&*\"\\'`\r\n\tadipisicing\r\nelit."
+        },
+        {
+          "name": "ConstText",
+          "value": "Lorem \r\n\t 01234567890\r\n\tipsum dolor\r\n\t()<>{}[]|\/|?.,+-=!@#$%^&*\"\\'`\r\n\tadipisicing\r\nelit."
+        },
+        {
+          "name": "ConstBool",
+          "value": "true"
+        },
+        {
+          "name": "ConstInt8",
+          "value": "200"
+        },
+        {
+          "name": "ConstInt16",
+          "value": "201"
+        },
+        {
+          "name": "ConstInt32",
+          "value": "202"
+        },
+        {
+          "name": "ConstInt64",
+          "value": "203"
+        },
+        {
+          "name": "ConstDate",
+          "value": "2018-03-17"
+        },
+        {
+          "name": "ConstTime",
+          "value": "14:15:16"
+        },
+        {
+          "name": "ConstDateTime",
+          "value": "2018-03-17 14:15:16"
+        },
+        {
+          "name": "ConstDecimal",
+          "value": "33.33"
+        },
+        {
+          "name": "ConstFloat",
+          "value": "44.44"
+        },
+        {
+          "name": "ConstDouble",
+          "value": "55.55"
+        }
+      ]
+    }
+  ],
   "source": {
     "type": "sqlserver",
     "schema": "dbo",

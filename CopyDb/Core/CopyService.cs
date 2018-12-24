@@ -40,13 +40,13 @@ namespace CopyDb.Core
                     return false;
                 var srcTables = await source.GetInfos(config.Source?.Filter);
                 var destTables = await destination.GetInfos(config.Destination?.Filter);
-                var diff = SimpleSchemaComparer(srcTables, destTables, config.CheckTypes);
+                var diff = SimpleSchemaComparer(srcTables, destTables, config.Tables, config.CheckTypes);
                 if (diff.isSame || config.Force)
                 {
                     if (config.Delete)
-                        await Delete(diff.common, destination);
+                        await Delete(diff.common.Select(x => x.dest).ToList(), destination);
                     if (config.Copy)
-                        await Copy(diff.common, source, destination, config.PageSize);
+                        await Copy(diff.common, config.Tables, source, destination, config.PageSize);
                 }
             }
             catch (Exception e)
@@ -69,11 +69,13 @@ namespace CopyDb.Core
             return null;
         }
 
-        private (bool isSame, List<TableInfo> common) SimpleSchemaComparer(List<TableInfo> source, List<TableInfo> destination, bool checkTypes)
+        private (bool isSame, List<(TableInfo src, TableInfo dest)> common) SimpleSchemaComparer(List<TableInfo> source, List<TableInfo> destination, List<TableConfig> tablesConfig, bool checkTypes)
         {
-            var result = (isSame: true, common: new List<TableInfo>());
+            var result = (isSame: true, common: new List<(TableInfo src, TableInfo dest)>());
+
             var (commonTables, onlySrcTables, onlyDestTables) =
-                Diff(source, destination, (src, dest) => string.Equals(src.Name, dest.Name, StringComparison.InvariantCultureIgnoreCase));
+                Diff(source, destination, (src, dest) => StringEquals(src.Name, dest.Name));
+
             if (onlySrcTables.Count > 0 || onlyDestTables.Count > 0)
             {
                 if (onlySrcTables.Count > 0)
@@ -83,23 +85,35 @@ namespace CopyDb.Core
                 result.isSame = false;
             }
 
-            Func<ColumnInfo, ColumnInfo, bool> columnComparer;
-            if (checkTypes)
-                columnComparer = (src, dest) => string.Equals(src.Name, dest.Name, StringComparison.InvariantCultureIgnoreCase) &&
-                    src.Type == dest.Type && src.IsNullable == dest.IsNullable;
-            else
-                columnComparer = (src, dest) => string.Equals(src.Name, dest.Name, StringComparison.InvariantCultureIgnoreCase);
+            bool ColumnComparer(ColumnInfo src, ColumnInfo dest) => StringEquals(src.Name, dest.Name)
+                && (!checkTypes || src.Type == dest.Type && src.IsNullable == dest.IsNullable);
+
             foreach (var common in commonTables)
             {
-                var (commonColumns, onlySrcColumns, onlyDestColumns) =
-                    Diff(common.src.Columns, common.dest.Columns, columnComparer);
-                result.common.Add(new TableInfo
+                var columns = Diff(common.src.Columns, common.dest.Columns, ColumnComparer);
+
+                var tableConfig = tablesConfig?.FirstOrDefault(x => StringEquals(x.Name, common.dest.Name));
+
+                var (commonColumns, onlySrcColumns, onlyDestColumns) = ColumnsCorrection(columns, tableConfig);
+
+                var destTableInfo = new TableInfo
                 {
                     Name = common.dest.Name,
                     Columns = commonColumns.Select(x => x.dest).ToList(),
                     Dependencies = common.dest.Dependencies,
                     References = common.dest.References
-                });
+                };
+
+                var srcTableInfo = new TableInfo
+                {
+                    Name = common.src.Name,
+                    Columns = commonColumns.Select(x => x.src).Where(x => x != null).ToList(),
+                    Dependencies = common.src.Dependencies,
+                    References = common.src.References
+                };
+
+                result.common.Add((srcTableInfo, destTableInfo));
+
                 if (onlySrcColumns.Count > 0 || onlyDestColumns.Count > 0)
                 {
                     if (onlySrcColumns.Count > 0)
@@ -120,9 +134,22 @@ namespace CopyDb.Core
             return (common, onlySrc, onlyDest);
         }
 
+        private (List<(ColumnInfo src, ColumnInfo dest)> common, List<ColumnInfo> onlySrc, List<ColumnInfo> onlyDest) ColumnsCorrection((List<(ColumnInfo src, ColumnInfo dest)> common, List<ColumnInfo> onlySrc, List<ColumnInfo> onlyDest) columns, TableConfig tableConfig)
+        {
+            if (tableConfig != null)
+            {
+                var isHere = columns.onlyDest.Where(dest => tableConfig.Columns.Any(x => StringEquals(x.Name, dest.Name))).ToList();
+
+                isHere.ForEach(x => columns.onlyDest.Remove(x));
+
+                foreach (var columnInfo in isHere)
+                    columns.common.Add((null, columnInfo));
+            }
+            return columns;
+        }
+
         private async Task Delete(List<TableInfo> infos, IDbProvider destination)
         {
-            infos = infos.ToList();
             var orderedList = new List<TableInfo>();
             while (infos.Count > 0)
             {
@@ -142,46 +169,70 @@ namespace CopyDb.Core
             }
         }
 
-        private async Task Copy(List<TableInfo> infos, IDbProvider source, IDbProvider destination, int pageSize)
+        private async Task Copy(List<(TableInfo src, TableInfo dest)> infos, List<TableConfig> tablesConfig, IDbProvider source, IDbProvider destination, int pageSize)
         {
-            infos = infos.ToList();
-            var orderedList = new List<TableInfo>();
+            var orderedList = new List<(TableInfo src, TableInfo dest)>();
             while (infos.Count > 0)
             {
-                var processed = orderedList.Select(x => x.Name).ToList();
-                var info = infos.FirstOrDefault(x => x.Dependencies.Count(d => x.Name != d && !processed.Contains(d)) == 0);
-                if (info == null)
-                    throw new Exception($"Unable to resolve dependencies to copy. processed: {string.Join(", ", processed)}. remaining: {string.Join(", ", infos.Select(x => x.Name))}.");
+                var processed = orderedList.Select(x => x.dest.Name).ToList();
+                var info = infos.FirstOrDefault(x => x.dest.Dependencies.Count(d => x.dest.Name != d && !processed.Contains(d)) == 0);
+                if (info.dest == null)
+                    throw new Exception($"Unable to resolve dependencies to copy. processed: {string.Join(", ", processed)}. remaining: {string.Join(", ", infos.Select(x => x.dest.Name))}.");
                 infos.Remove(info);
                 orderedList.Add(info);
             }
-            _logger.Trace($"ordered to copy: {string.Join(", ", orderedList.Select(x => x.Name))}");
+            _logger.Trace($"ordered to copy: {string.Join(", ", orderedList.Select(x => x.dest.Name))}");
             var sw = new Stopwatch();
             foreach (var info in orderedList)
             {
+                var tableConfig = tablesConfig?.FirstOrDefault(x => StringEquals(x.Name, info.dest.Name));
+
                 using (destination.BeginTransaction())
                 {
                     sw.Restart();
-                    if (info.Columns.Count > 0)
+                    if (info.dest.Columns.Count > 0)
                     {
-                        await destination.BeforeInsert(info);
+                        await destination.BeforeInsert(info.dest);
                         int page = 0;
                         while (true)
                         {
                             page++;
-                            var table = await source.Select(info, page, pageSize);
+                            var table = await source.Select(info.src, page, pageSize);
                             if (table.Rows.Count > 0)
-                                await destination.Insert(info, table);
-                            _logger.Info($"Copied {(page - 1) * pageSize + table.Rows.Count} rows to '{info.Name}' elapsed time {sw.ElapsedMilliseconds / 1000} sec");
+                            {
+                                DataTableCorrection(table, tableConfig);
+                                await destination.Insert(info.dest, table);
+                            }
+                            _logger.Info($"Copied {(page - 1) * pageSize + table.Rows.Count} rows to '{info.dest.Name}' elapsed time {sw.ElapsedMilliseconds / 1000} sec");
                             if (table.Rows.Count != pageSize)
                                 break;
                         }
-                        await destination.AfterInsert(info);
+                        await destination.AfterInsert(info.dest);
                     }
                     sw.Stop();
                     destination.Commit();
                 }
             }
+        }
+
+        private void DataTableCorrection(DataTable table, TableConfig tableConfig)
+        {
+            if (tableConfig?.Columns?.Count > 0)
+            {
+                foreach (var column in tableConfig.Columns)
+                {
+                    var dataColumn = table.Columns.Cast<DataColumn>()
+                                         .FirstOrDefault(x => StringEquals(x.ColumnName, column.Name))
+                                     ?? table.Columns.Add(column.Name);
+                    foreach (DataRow row in table.Rows)
+                        row[dataColumn.ColumnName] = column.Value;
+                }
+            }
+        }
+
+        private bool StringEquals(string first, string second)
+        {
+            return string.Equals(first, second, StringComparison.InvariantCultureIgnoreCase);
         }
     }
 }
