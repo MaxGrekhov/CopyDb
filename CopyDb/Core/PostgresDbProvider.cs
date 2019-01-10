@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Data;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using CopyDb.Models;
@@ -21,7 +22,7 @@ namespace CopyDb.Core
 
         protected override string GetPaginationSql(TableInfo info, int page, int count)
         {
-            return "limit @limit offset @offset";
+            return $"order by {BeginEscape}{info.Columns[0].Name}{EndEscape} limit @limit offset @offset";
         }
 
         public override Task Insert(TableInfo info, DataTable table)
@@ -41,9 +42,9 @@ namespace CopyDb.Core
                 sb.Append(column.Name);
                 sb.Append(EndEscape);
             }
-            sb.Append(") FROM STDIN DELIMITER ';' QUOTE '\"' ESCAPE '\\' NULL '@NULL' csv");
+            sb.Append(@") FROM STDIN DELIMITER ';' QUOTE '""' ESCAPE '\' NULL '@NULL' csv");
             using (var writer = ((NpgsqlConnection)Connection).BeginTextImport(sb.ToString()))
-            using (var csv = new CsvWriter(writer, new Configuration { Delimiter = ";" }))
+            using (var csv = new CsvWriter(writer, new Configuration { Delimiter = ";", Escape = '\\' }))
             {
                 foreach (DataRow row in table.Rows)
                 {

@@ -209,8 +209,8 @@ namespace CopyDb.Core
                         }
                         await destination.AfterInsert(info.dest);
                     }
-                    sw.Stop();
                     destination.Commit();
+                    sw.Stop();
                 }
             }
         }

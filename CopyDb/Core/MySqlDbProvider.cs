@@ -48,7 +48,7 @@ namespace CopyDb.Core
 
         protected override string GetPaginationSql(TableInfo info, int page, int count)
         {
-            return "limit @offset, @limit";
+            return $"order by {BeginEscape}{info.Columns[0].Name}{EndEscape} limit @offset, @limit";
         }
 
         public override async Task Insert(TableInfo info, DataTable table)
